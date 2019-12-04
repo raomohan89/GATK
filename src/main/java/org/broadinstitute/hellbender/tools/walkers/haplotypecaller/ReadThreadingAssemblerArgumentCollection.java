@@ -52,6 +52,12 @@ public abstract class ReadThreadingAssemblerArgumentCollection implements Serial
     @Argument(fullName="padding-around-snps", doc = "Include at least this many bases around an event for calling snps", optional = true)
     public int snpPadding = 20;
 
+    /**
+     * This argument is meant for debugging and is not immediately useful for normal analysis use.
+     */
+    @Argument(fullName="active-region-out", doc="Write debug interval list file containing summary info about each active region", optional = true)
+    public String assemblyRegionOutput = null;
+
     // -----------------------------------------------------------------------------------------------
     // arguments to control internal behavior of the read threading assembler
     // -----------------------------------------------------------------------------------------------
