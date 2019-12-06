@@ -546,6 +546,7 @@ public class Mutect2IntegrationTest extends CommandLineProgramTest {
                     return args;
                 });
 
+        // add tests for DUPLICATE
         final List<Set<String>> actualFilters = VariantContextTestUtils.streamVcf(filteredVcf)
                 .map(VariantContext::getFilters).collect(Collectors.toList());
 
