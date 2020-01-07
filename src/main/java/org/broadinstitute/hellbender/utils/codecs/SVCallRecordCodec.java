@@ -7,6 +7,7 @@ import htsjdk.variant.variantcontext.StructuralVariantType;
 import org.broadinstitute.hellbender.tools.sv.SVCallRecord;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 public class SVCallRecordCodec extends AsciiFeatureCodec<SVCallRecord> {
@@ -23,14 +24,14 @@ public class SVCallRecordCodec extends AsciiFeatureCodec<SVCallRecord> {
         return new SVCallRecord(
                 tokens[0],
                 Integer.parseUnsignedInt(tokens[1]),
-                tokens[2] == "+",
+                tokens[2].equals("+"),
                 tokens[3],
                 Integer.parseUnsignedInt(tokens[4]),
-                tokens[5] == "+",
+                tokens[5].equals("+"),
                 StructuralVariantType.valueOf(tokens[6]),
                 Integer.parseInt(tokens[7]),
                 Arrays.asList(tokens[8]),
-                tokens[9]
+                Collections.singleton(tokens[9])
         );
     }
 
@@ -41,7 +42,7 @@ public class SVCallRecordCodec extends AsciiFeatureCodec<SVCallRecord> {
 
     @Override
     public boolean canDecode(final String path) {
-        return true;
+        return path.endsWith(".gz");
     } // TODO
 
     @Override
@@ -58,7 +59,7 @@ public class SVCallRecordCodec extends AsciiFeatureCodec<SVCallRecord> {
                 record.getType().name(),
                 Integer.toString(record.getLength()),
                 String.join(",", record.getAlgorithms()),
-                record.getSample()
+                String.join(",", record.getSamples())
         );
         return String.join(COL_DELIMITER, data);
     }

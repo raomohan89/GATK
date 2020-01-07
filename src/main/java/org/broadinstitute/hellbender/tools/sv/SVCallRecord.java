@@ -6,8 +6,9 @@ import htsjdk.variant.variantcontext.StructuralVariantType;
 import htsjdk.variant.variantcontext.VariantContext;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 
-import java.util.Collection;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class SVCallRecord implements Feature {
@@ -21,30 +22,59 @@ public class SVCallRecord implements Feature {
     private final boolean endStrand;
 
     private final StructuralVariantType type;
-    private final int length;
-    private final List<String> algorithms;
+    private int length;
+    final List<String> algorithms;
 
-    private final String sample;
+    final Set<String> samples;
 
-    public static Collection<SVCallRecord> create(final VariantContext variant) {
+    private final static List<String> attributeStrings = Arrays.asList(
+            SVCluster.END_CONTIG_ATTRIBUTE,
+            SVCluster.ALG_ATTRIBUTE,
+            SVCluster.STRANDS_ATTRIBUTE,
+            SVCluster.SVLEN_ATTRIBUTE
+    );
+
+    public static SVCallRecord create(final VariantContext variant) {
+        for (final String attr : attributeStrings) {
+            if (!variant.hasAttribute(attr)) {
+                throw new IllegalArgumentException("Attribute not found: " + attr);
+            }
+        }
         final String startContig = variant.getContig();
         final int start = variant.getStart();
-        final String endContig = variant.getAttributeAsString("CHR2", "NA");
+        final String endContig = variant.getAttributeAsString(SVCluster.END_CONTIG_ATTRIBUTE, "NA");
         final int end = variant.getEnd();
         final StructuralVariantType type = variant.getStructuralVariantType();
-        final List<String> algorithms = variant.getAttributeAsStringList("ALGORITHMS", "NA");
-        final String strands = variant.getAttributeAsString("STRANDS", "XX");
+        final List<String> algorithms = variant.getAttributeAsStringList(SVCluster.ALG_ATTRIBUTE, "NA");
+        final String strands = variant.getAttributeAsString(SVCluster.STRANDS_ATTRIBUTE, "0");
+        final char startStrandChar = strands.charAt(0);
+        if (startStrandChar != '+' && startStrandChar != '-') {
+            throw new IllegalArgumentException("Valid start strand not found");
+        }
+        final char endStrandChar = strands.charAt(1);
+        if (endStrandChar != '+' && endStrandChar != '-') {
+            throw new IllegalArgumentException("Valid end strand not found");
+        }
         final boolean startStrand = strands.charAt(0) == '+';
         final boolean endStrand = strands.charAt(1) == '+';
-        final int length = variant.getAttributeAsInt("SVLEN", 0);
-        return variant.getGenotypes().stream()
+        final int length = variant.getAttributeAsInt(SVCluster.SVLEN_ATTRIBUTE, 0);
+        final Set<String> samples = variant.getGenotypes().stream()
                 .filter(Genotype::isCalled)
                 .map(Genotype::getSampleName)
-                .map(s -> new SVCallRecord(startContig, start, startStrand, endContig, end, endStrand, type, length, algorithms, s))
-                .collect(Collectors.toList());
+                .collect(Collectors.toSet());
+        return new SVCallRecord(startContig, start, startStrand, endContig, end, endStrand, type, length, algorithms, samples);
     }
 
-    public SVCallRecord(String startContig, int start, boolean startStrand, String endContig, int end, boolean endStrand, StructuralVariantType type, int length, List<String> algorithms, String sample) {
+    public SVCallRecord(String startContig,
+                        int start,
+                        boolean startStrand,
+                        String endContig,
+                        int end,
+                        boolean endStrand,
+                        StructuralVariantType type,
+                        int length,
+                        List<String> algorithms,
+                        Set<String> samples) {
         this.startContig = startContig;
         this.start = start;
         this.startStrand = startStrand;
@@ -54,9 +84,10 @@ public class SVCallRecord implements Feature {
         this.type = type;
         this.length = length;
         this.algorithms = algorithms;
-        this.sample = sample;
+        this.samples = samples;
     }
 
+    @Override
     public String getContig() {
         return startContig;
     }
@@ -95,8 +126,8 @@ public class SVCallRecord implements Feature {
         return algorithms;
     }
 
-    public String getSample() {
-        return sample;
+    public Set<String> getSamples() {
+        return samples;
     }
 
     public SimpleInterval getStartAsInterval() {

@@ -105,7 +105,7 @@ public final class CreateSVCallRecords extends GATKTool {
         int index = 0;
         for (final String file : inputFiles) {
             records.addAll(StreamSupport.stream(Spliterators.spliteratorUnknownSize(getVariants(file, "vcf_" + index), 0), false)
-                    .flatMap(v -> SVCallRecord.create(v).stream()).collect(Collectors.toList()));
+                    .map(SVCallRecord::create).collect(Collectors.toList()));
         }
         records.sort(IntervalUtils.getDictionaryOrderComparator(dictionary));
         writeVariants();

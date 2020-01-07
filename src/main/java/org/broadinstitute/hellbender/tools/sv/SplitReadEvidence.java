@@ -27,10 +27,12 @@ public final class SplitReadEvidence implements Feature {
         return contig;
     }
 
+    @Override
     public int getStart() {
         return position;
     }
 
+    @Override
     public int getEnd() {
         return position + 1;
     }
