@@ -1,5 +1,7 @@
 package org.broadinstitute.hellbender.tools.sv;
 
+import org.broadinstitute.hellbender.utils.Utils;
+
 import java.util.Map;
 import java.util.Set;
 
@@ -25,6 +27,11 @@ final class SplitReadSite {
                 .filter(e -> samples.contains(e.getKey()))
                 .mapToInt(e -> e.getValue())
                 .sum();
+    }
+
+    public double getNormalizedCountSum(final Map<String,Double> sampleCoverageMap) {
+        Utils.validateArg(sampleCoverageMap.keySet().containsAll(sampleCountsMap.keySet()), "Coverage missing for one or more samples");
+        return sampleCountsMap.entrySet().stream().mapToDouble(e -> e.getValue() / sampleCoverageMap.get(e.getKey())).sum();
     }
 
     public int getCountSum() {

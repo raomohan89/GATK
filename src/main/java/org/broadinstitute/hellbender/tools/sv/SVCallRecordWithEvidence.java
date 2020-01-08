@@ -1,22 +1,24 @@
 package org.broadinstitute.hellbender.tools.sv;
 
 import htsjdk.variant.variantcontext.StructuralVariantType;
+import org.broadinstitute.hellbender.utils.Utils;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
 public class SVCallRecordWithEvidence extends SVCallRecord {
 
-    List<SplitReadSite> startSplitReadSites;
-    List<SplitReadSite> endSplitReadSites;
-    List<DiscordantPairEvidence> discordantPairs;
+    private final List<SplitReadSite> startSplitReadSites;
+    private final List<SplitReadSite> endSplitReadSites;
+    private final List<DiscordantPairEvidence> discordantPairs;
 
     public SVCallRecordWithEvidence(final SVCallRecord record) {
         super(record.getContig(), record.getStart(), record.getStartStrand(), record.getEndContig(), record.getEnd(),
                 record.getEndStrand(), record.getType(), record.getLength(), record.getAlgorithms(), record.getSamples());
-        this.startSplitReadSites = null;
-        this.endSplitReadSites = null;
-        this.discordantPairs = null;
+        this.startSplitReadSites = Collections.emptyList();
+        this.endSplitReadSites = Collections.emptyList();
+        this.discordantPairs = Collections.emptyList();
     }
 
     public SVCallRecordWithEvidence(final SVCallRecord record,
@@ -25,31 +27,33 @@ public class SVCallRecordWithEvidence extends SVCallRecord {
                                     List<DiscordantPairEvidence> discordantPairs) {
         super(record.getContig(), record.getStart(), record.getStartStrand(), record.getEndContig(), record.getEnd(),
                 record.getEndStrand(), record.getType(), record.getLength(), record.getAlgorithms(), record.getSamples());
+        Utils.nonNull(startSplitReadSites);
+        Utils.nonNull(endSplitReadSites);
+        Utils.nonNull(discordantPairs);
+        Utils.containsNoNull(startSplitReadSites, "Encountered null in start split reads");
+        Utils.containsNoNull(endSplitReadSites, "Encountered null in end split reads");
+        Utils.containsNoNull(discordantPairs, "Encountered null in discordant pairs");
         this.startSplitReadSites = startSplitReadSites;
         this.endSplitReadSites = endSplitReadSites;
         this.discordantPairs = discordantPairs;
     }
 
-    public SVCallRecordWithEvidence(String startContig,
-                        int start,
-                        boolean startStrand,
-                        String endContig,
-                        int end,
-                        boolean endStrand,
-                        StructuralVariantType type,
-                        int length,
-                        List<String> algorithms,
-                        Set<String> samples,
-                        List<SplitReadSite> startSplitReadSites,
-                        List<SplitReadSite> endSplitReadSites,
-                        List<DiscordantPairEvidence> discordantPairs) {
+    public SVCallRecordWithEvidence(final String startContig,
+                                    final int start,
+                                    final boolean startStrand,
+                                    final String endContig,
+                                    final int end,
+                                    final boolean endStrand,
+                                    final StructuralVariantType type,
+                                    final int length,
+                                    final List<String> algorithms,
+                                    final Set<String> samples,
+                                    final List<SplitReadSite> startSplitReadSites,
+                                    final List<SplitReadSite> endSplitReadSites,
+                                    final List<DiscordantPairEvidence> discordantPairs) {
         super(startContig, start, startStrand, endContig, end, endStrand, type, length, algorithms, samples);
         this.startSplitReadSites = startSplitReadSites;
         this.endSplitReadSites = endSplitReadSites;
-        this.discordantPairs = discordantPairs;
-    }
-
-    public void setDiscordantPairs(final List<DiscordantPairEvidence> discordantPairs) {
         this.discordantPairs = discordantPairs;
     }
 
@@ -63,13 +67,5 @@ public class SVCallRecordWithEvidence extends SVCallRecord {
 
     public List<SplitReadSite> getEndSplitReadSites() {
         return endSplitReadSites;
-    }
-
-    public void setStartSplitReadSites(final List<SplitReadSite> startSplitReadSites) {
-        this.startSplitReadSites = startSplitReadSites;
-    }
-
-    public void setEndSplitReadSites(final List<SplitReadSite> endSplitReadSites) {
-        this.endSplitReadSites = endSplitReadSites;
     }
 }

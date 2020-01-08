@@ -5,6 +5,7 @@ import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.StructuralVariantType;
 import htsjdk.variant.variantcontext.VariantContext;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
+import org.broadinstitute.hellbender.utils.Utils;
 
 import java.util.Arrays;
 import java.util.List;
@@ -16,16 +17,13 @@ public class SVCallRecord implements Feature {
     private final String startContig;
     private final int start;
     private final boolean startStrand;
-
     private final String endContig;
     private final int end;
     private final boolean endStrand;
-
     private final StructuralVariantType type;
     private int length;
-    final List<String> algorithms;
-
-    final Set<String> samples;
+    private final List<String> algorithms;
+    private final Set<String> samples;
 
     private final static List<String> attributeStrings = Arrays.asList(
             SVCluster.END_CONTIG_ATTRIBUTE,
@@ -35,6 +33,7 @@ public class SVCallRecord implements Feature {
     );
 
     public static SVCallRecord create(final VariantContext variant) {
+        Utils.nonNull(variant);
         for (final String attr : attributeStrings) {
             if (!variant.hasAttribute(attr)) {
                 throw new IllegalArgumentException("Attribute not found: " + attr);
@@ -65,16 +64,25 @@ public class SVCallRecord implements Feature {
         return new SVCallRecord(startContig, start, startStrand, endContig, end, endStrand, type, length, algorithms, samples);
     }
 
-    public SVCallRecord(String startContig,
-                        int start,
-                        boolean startStrand,
-                        String endContig,
-                        int end,
-                        boolean endStrand,
-                        StructuralVariantType type,
-                        int length,
-                        List<String> algorithms,
-                        Set<String> samples) {
+    public SVCallRecord(final String startContig,
+                        final int start,
+                        final boolean startStrand,
+                        final String endContig,
+                        final int end,
+                        final boolean endStrand,
+                        final StructuralVariantType type,
+                        final int length,
+                        final List<String> algorithms,
+                        final Set<String> samples) {
+        Utils.nonNull(startContig);
+        Utils.nonNull(endContig);
+        Utils.nonNull(type);
+        Utils.nonNull(algorithms);
+        Utils.nonNull(samples);
+        Utils.nonEmpty(algorithms);
+        Utils.nonEmpty(samples);
+        Utils.containsNoNull(algorithms, "Encountered null algorithm");
+        Utils.containsNoNull(samples, "Encountered null sample");
         this.startContig = startContig;
         this.start = start;
         this.startStrand = startStrand;

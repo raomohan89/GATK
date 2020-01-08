@@ -17,7 +17,6 @@ public class SVClusterEngine {
     private final double BREAKEND_CLUSTERING_WINDOW_FRACTION = 0.5;
     private final int MIN_BREAKEND_CLUSTERING_WINDOW = 50;
     private final int MAX_BREAKEND_CLUSTERING_WINDOW = 300;
-    private final int NORMALIZED_SPLIT_READ_PRECISE_THRESHOLD = 3;
 
     private final SAMSequenceDictionary dictionary;
     private final List<Tuple2<SimpleInterval,List<Integer>>> currentClusters;
@@ -45,7 +44,7 @@ public class SVClusterEngine {
         idToVariantMap.put(currentVariantId, variant);
 
         // Start a new cluster if on a new contig
-        if (currentContig == null || !variant.getContig().equals(currentContig)) {
+        if (!variant.getContig().equals(currentContig)) {
             processBuffer();
             currentContig = variant.getContig();
             seedCluster(currentVariantId);
@@ -327,7 +326,7 @@ public class SVClusterEngine {
             final SVCallRecordWithEvidence record = sortedCalls.get(i);
             int j = i + 1;
             final Collection<Integer> identicalCallIndexes = new ArrayList<>();
-            while (j < calls.size() && record.getStartAsInterval().equals(sortedCalls.get(j).getEndAsInterval())) {
+            while (j < sortedCalls.size() && record.getStartAsInterval().equals(sortedCalls.get(j).getStartAsInterval())) {
                 final SVCallRecordWithEvidence other = sortedCalls.get(j);
                 if (record.getEndAsInterval().equals(other.getEndAsInterval())
                         && record.getType().equals(other.getType())
@@ -342,7 +341,7 @@ public class SVClusterEngine {
                 i++;
             } else {
                 identicalCallIndexes.add(i);
-                final List<SVCallRecordWithEvidence> identicalCalls = identicalCallIndexes.stream().map(calls::get).collect(Collectors.toList());
+                final List<SVCallRecordWithEvidence> identicalCalls = identicalCallIndexes.stream().map(sortedCalls::get).collect(Collectors.toList());
                 final Set<String> samples = identicalCalls.stream()
                         .map(SVCallRecordWithEvidence::getSamples)
                         .flatMap(Collection::stream)
