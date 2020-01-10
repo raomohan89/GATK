@@ -52,6 +52,12 @@ public class SVCallRecordWithEvidence extends SVCallRecord {
                                     final List<SplitReadSite> endSplitReadSites,
                                     final List<DiscordantPairEvidence> discordantPairs) {
         super(startContig, start, startStrand, endContig, end, endStrand, type, length, algorithms, samples);
+        Utils.nonNull(startSplitReadSites);
+        Utils.nonNull(endSplitReadSites);
+        Utils.nonNull(discordantPairs);
+        Utils.containsNoNull(startSplitReadSites, "Encountered null in start split reads");
+        Utils.containsNoNull(endSplitReadSites, "Encountered null in end split reads");
+        Utils.containsNoNull(discordantPairs, "Encountered null in discordant pairs");
         this.startSplitReadSites = startSplitReadSites;
         this.endSplitReadSites = endSplitReadSites;
         this.discordantPairs = discordantPairs;

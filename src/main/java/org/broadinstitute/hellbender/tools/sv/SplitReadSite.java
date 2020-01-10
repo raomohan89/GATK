@@ -34,6 +34,12 @@ final class SplitReadSite {
         return sampleCountsMap.entrySet().stream().mapToDouble(e -> e.getValue() / sampleCoverageMap.get(e.getKey())).sum();
     }
 
+    public double getNormalizedCountSum(final Set<String> samples, final Map<String,Double> sampleCoverageMap) {
+        Utils.validateArg(sampleCoverageMap.keySet().containsAll(samples), "Coverage missing for one or more samples");
+        return sampleCountsMap.entrySet().stream().filter(e -> samples.contains(e.getKey()))
+                .mapToDouble(e -> e.getValue() / sampleCoverageMap.get(e.getKey())).sum();
+    }
+
     public int getCountSum() {
         return sampleCountsMap.values().stream().mapToInt(Integer::intValue).sum();
     }

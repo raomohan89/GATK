@@ -119,6 +119,7 @@ public final class SVCluster extends GATKTool {
 
     private FeatureDataSource<SVCallRecord> reader;
     private VariantContextWriter writer;
+    private int variantsWritten;
 
     private FeatureDataSource<SplitReadEvidence> splitReadSource;
     private FeatureDataSource<DiscordantPairEvidence> discordantPairSource;
@@ -164,6 +165,7 @@ public final class SVCluster extends GATKTool {
         reader.setIntervalsForTraversal(getTraversalIntervals());
         progressMeter.setRecordsBetweenTimeChecks(100);
         writer = createVCFWriter(Paths.get(outputFile));
+        variantsWritten = 0;
     }
 
     @Override
@@ -223,7 +225,7 @@ public final class SVCluster extends GATKTool {
         logger.info("Collecting evidence for " + clusteredCalls.size() + " clusters...");
         final List<SVCallRecordWithEvidence> callsWithEvidence = evidenceCollector.collectEvidence(clusteredCalls);
         logger.info("Refining breakpoints of " + clusteredCalls.size() + " clusters...");
-        final List<SVCallRecordWithEvidence> refinedCalls = callsWithEvidence.stream().map(breakpointRefiner::refineCalls).collect(Collectors.toList());
+        final List<SVCallRecordWithEvidence> refinedCalls = callsWithEvidence.stream().map(breakpointRefiner::refineCall).collect(Collectors.toList());
         final List<SVCallRecordWithEvidence> finalCalls = SVClusterEngine.deduplicateCalls(refinedCalls, dictionary);
         logger.info("Writing output...");
         writeOutput(finalCalls);
@@ -254,6 +256,7 @@ public final class SVCluster extends GATKTool {
         header.addMetaDataLine(new VCFInfoHeaderLine(SVLEN_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Variant length"));
         header.addMetaDataLine(new VCFInfoHeaderLine(SVTYPE_ATTRIBUTE, 1, VCFHeaderLineType.String, "Variant type"));
         header.addMetaDataLine(new VCFInfoHeaderLine(ALG_ATTRIBUTE, 1, VCFHeaderLineType.String, "List of calling algorithms"));
+        header.addMetaDataLine(new VCFFormatHeaderLine(VCFConstants.GENOTYPE_KEY, 1, VCFHeaderLineType.String, "Genotype"));
         header.addMetaDataLine(new VCFFormatHeaderLine(SPLIT_READ_START_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Split read count at start of variant"));
         header.addMetaDataLine(new VCFFormatHeaderLine(SPLIT_READ_END_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Split read count at end of variant"));
         header.addMetaDataLine(new VCFFormatHeaderLine(DISCORDANT_PAIR_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Discordant pair count"));
@@ -263,8 +266,9 @@ public final class SVCluster extends GATKTool {
     public VariantContext buildVariantContext(final SVCallRecordWithEvidence call) {
         Utils.nonNull(call);
         final Allele altAllele = Allele.create("<" + call.getType().name() + ">", false);
+        final Allele refAllele = Allele.REF_N;
         final VariantContextBuilder builder = new VariantContextBuilder("", call.getContig(), call.getStart(), call.getEnd(),
-                Lists.newArrayList(Allele.REF_N, altAllele));
+                Lists.newArrayList(refAllele, altAllele));
         builder.attribute(END_CONTIG_ATTRIBUTE, call.getEndContig());
         builder.attribute(END_POS_ATTRIBUTE, call.getEnd());
         builder.attribute(SVLEN_ATTRIBUTE, call.getLength());
@@ -279,9 +283,16 @@ public final class SVCluster extends GATKTool {
             genotypeBuilder.attribute(SPLIT_READ_START_COUNT_ATTRIBUTE, startSplitReadCounts.getOrDefault(sample, 0));
             genotypeBuilder.attribute(SPLIT_READ_END_COUNT_ATTRIBUTE, endSplitReadCounts.getOrDefault(sample, 0));
             genotypeBuilder.attribute(DISCORDANT_PAIR_COUNT_ATTRIBUTE, discordantPairCounts.getOrDefault(sample, 0));
+            if (call.getSamples().contains(sample)) {
+                genotypeBuilder.alleles(Lists.newArrayList(refAllele, altAllele));
+            } else {
+                genotypeBuilder.alleles(Lists.newArrayList(refAllele, refAllele));
+            }
             genotypes.add(genotypeBuilder.make());
         }
         builder.genotypes(genotypes);
+        builder.id(String.format("SVx%08X", variantsWritten));
+        variantsWritten++;
         return builder.make();
     }
 

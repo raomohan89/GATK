@@ -1,6 +1,8 @@
 package org.broadinstitute.hellbender.tools.sv;
 
 import htsjdk.variant.variantcontext.StructuralVariantType;
+import org.apache.commons.math3.special.Beta;
+import org.apache.commons.math3.special.Gamma;
 import org.apache.commons.math3.util.FastMath;
 import org.apache.commons.math3.util.MathUtils;
 import org.broadinstitute.hellbender.utils.Utils;
@@ -33,13 +35,16 @@ public class BreakpointRefiner {
         minSiteProbability = p;
     }
 
-    public SVCallRecordWithEvidence refineCalls(final SVCallRecordWithEvidence call) {
+    public SVCallRecordWithEvidence refineCall(final SVCallRecordWithEvidence call) {
         Utils.nonNull(call);
         Utils.nonNull(call.getStartSplitReadSites());
         final SVCallRecordWithEvidence refinedCall;
         if (SVClusterEngine.isDepthOnlyCall(call)) {
             refinedCall = call;
         } else {
+            if (call.getStart() == 1068047) {
+                int x = 0;
+            }
             final Set<String> backgroundSamples = getBackgroundSamples(call);
             final SplitReadSite refinedStartSite = getRefinedSite(call.getStartSplitReadSites(), call.getSamples(), backgroundSamples, call.getStart());
             final int endLowerBound = getEndLowerBound(call.getType(), call.getContig(), refinedStartSite.getPosition(), call.getEndContig());
@@ -82,7 +87,7 @@ public class BreakpointRefiner {
         if (!sampleCoverageMap.keySet().containsAll(backgroundSamples)) {
             throw new IllegalArgumentException("One or more non-carrier samples not found in sample coverage map");
         }
-        return testSitesByLikelihood(sites, defaultPosition, carrierSamples, backgroundSamples);
+        return testSitesByOneSamplePoissonTest(sites, defaultPosition, carrierSamples, backgroundSamples);
     }
 
     private SplitReadSite testSitesByRateExcess(final List<SplitReadSite> sites,
@@ -113,6 +118,108 @@ public class BreakpointRefiner {
         return Math.max(carrierRate - backgroundRate, 0.);
     }
 
+    private SplitReadSite testSitesByTwoSamplePoissonTest(final List<SplitReadSite> sites,
+                                                final int defaultPosition,
+                                                final Set<String> carrierSamples,
+                                                final Set<String> backgroundSamples) {
+        final long meanCoverage = Math.round(sampleCoverageMap.values().stream().mapToDouble(c -> c).sum()) / sampleCoverageMap.size();
+        if (sites.isEmpty() || carrierSamples.isEmpty()) return new SplitReadSite(defaultPosition, Collections.emptyMap());
+        List<Tuple2<SplitReadSite,Tuple2<Double,Double>>> siteScorePairs = sites.stream()
+                .map(s -> new Tuple2<>(s, calculateTwoSamplePoissonTest(s, carrierSamples, backgroundSamples, meanCoverage)))
+                .collect(Collectors.toList());
+        final double maxLogP = siteScorePairs.stream().map(Tuple2::_2).mapToDouble(Tuple2::_1).max().getAsDouble();
+        SplitReadSite result = siteScorePairs.stream()
+                .filter(p -> p._2._1 == maxLogP)
+                .min(Comparator.comparingDouble(p -> p._2._2))
+                .get()._1;
+        return result;
+    }
+
+    private Tuple2<Double,Double> calculateTwoSamplePoissonTest(final SplitReadSite site,
+                                        final Set<String> carrierSamples,
+                                        final Set<String> backgroundSamples,
+                                        final double meanCoverage) {
+        final double carrierRate = site.getNormalizedCountSum(carrierSamples, sampleCoverageMap);
+        final double backgroundRate = site.getNormalizedCountSum(backgroundSamples, sampleCoverageMap);
+        if (carrierRate == 0 && backgroundRate == 0) {
+            return new Tuple2<>(0., 0.);
+        }
+        final int k1 = (int) (carrierRate * meanCoverage);
+        final int k2 = (int) (backgroundRate * meanCoverage);
+        final int k = k1 + k2;
+        final double p = carrierSamples.size() / (double) (carrierSamples.size() + backgroundSamples.size());
+        final double cumulativeProb = cumulativeBinomialProbability(k1, k, p);
+        final double logP = -FastMath.log(1. - cumulativeProb);
+        if (carrierRate > backgroundRate) {
+            int x = 0;
+        }
+        return new Tuple2<>(logP, carrierRate);
+    }
+
+    private SplitReadSite testSitesByOneSamplePoissonTest(final List<SplitReadSite> sites,
+                                                          final int defaultPosition,
+                                                          final Set<String> carrierSamples,
+                                                          final Set<String> backgroundSamples) {
+        if (sites.isEmpty() || carrierSamples.isEmpty()) return new SplitReadSite(defaultPosition, Collections.emptyMap());
+        final long meanCoverage = Math.round(sampleCoverageMap.values().stream().mapToDouble(c -> c).sum()) / sampleCoverageMap.size();
+        List<Tuple2<SplitReadSite,Double>> siteScorePairs = sites.stream()
+                .map(s -> new Tuple2<>(s, calculateOneSamplePoissonTest(s, carrierSamples, backgroundSamples, meanCoverage)))
+                .collect(Collectors.toList());
+        final double maxLogP = siteScorePairs.stream().mapToDouble(Tuple2::_2).max().getAsDouble();
+        SplitReadSite result = siteScorePairs.stream()
+                .filter(p -> p._2 == maxLogP)
+                .min(Comparator.comparingInt(s -> Math.abs(s._1.getPosition() - defaultPosition)))
+                .get()._1;
+        return result;
+    }
+
+    private double calculateOneSamplePoissonTest(final SplitReadSite site,
+                                                 final Set<String> carrierSamples,
+                                                 final Set<String> backgroundSamples,
+                                                 final double meanCoverage) {
+        final double carrierRate = site.getNormalizedCountSum(carrierSamples, sampleCoverageMap) / carrierSamples.size();
+        if (backgroundSamples.isEmpty()) {
+            // If no background samples, return counts
+            return carrierRate;
+        }
+        if (carrierRate == 0) {
+            // If no carrier support, return 0
+            return 0;
+        }
+        final List<Double> backgroundRates = backgroundSamples.stream()
+                .map(s -> site.getSampleCountsMap().containsKey(s) ? site.getSampleCountsMap().get(s) / sampleCoverageMap.get(s) : 0.)
+                .sorted()
+                .collect(Collectors.toList());
+        final double medianBackgroundRate = backgroundRates.size() % 2 == 0 ?
+                (backgroundRates.get(backgroundRates.size()/2) + backgroundRates.get((backgroundRates.size()/2)-1)) / 2.0
+                : backgroundRates.get(backgroundRates.size()/2);
+        final int backgroundCount = (int) Math.round(medianBackgroundRate * meanCoverage);
+        final double p = 1.0 - cumulativePoissonProbability(meanCoverage * carrierRate, backgroundCount);
+        return p;
+    }
+
+    public static double cumulativePoissonProbability(double mean, int x) {
+        if (x < 0) {
+            return 0;
+        }
+        if (x == Integer.MAX_VALUE) {
+            return 1;
+        }
+        return Gamma.regularizedGammaQ((double) x + 1, mean);
+    }
+
+    public double cumulativeBinomialProbability(int x, final int n, final double p) {
+        double ret;
+        if (x < 0) {
+            ret = 0.0;
+        } else if (x >= n) {
+            ret = 1.0;
+        } else {
+            ret = 1.0 - Beta.regularizedBeta(p, x + 1.0, n - x);
+        }
+        return ret;
+    }
+
     private SplitReadSite testSitesByCount(final List<SplitReadSite> sites,
                                            final int defaultPosition,
                                            final Set<String> carrierSamples) {
@@ -129,7 +236,8 @@ public class BreakpointRefiner {
                                                 final Set<String> carrierSamples,
                                                 final Set<String> backgroundSamples) {
         if (sites.isEmpty() || carrierSamples.isEmpty()) return new SplitReadSite(defaultPosition, Collections.emptyMap());
-        final double epsilon = sites.stream().mapToDouble(s -> s.getNormalizedCountSum(sampleCoverageMap)).sum() / (sites.size() * (carrierSamples.size() + backgroundSamples.size()));
+        final double averageCount = sites.stream().mapToDouble(s -> s.getNormalizedCountSum(sampleCoverageMap)).sum() / (sites.size() * (carrierSamples.size() + backgroundSamples.size()));
+        final double epsilon = Math.max(0.01, averageCount);
         List<Tuple2<SplitReadSite,Double>> siteScorePairs = sites.stream()
                 .map(s -> new Tuple2<>(s, calculateJointLikelihood(s, carrierSamples, backgroundSamples, epsilon)))
                 .collect(Collectors.toList());

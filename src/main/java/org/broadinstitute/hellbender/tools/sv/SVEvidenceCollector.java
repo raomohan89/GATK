@@ -102,12 +102,15 @@ public class SVEvidenceCollector {
         if (SVClusterEngine.isDepthOnlyCall(call)) {
             callWithEvidence = new SVCallRecordWithEvidence(call, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
         } else {
+            if (call.getStart() == 1068047) {
+                int x = 0;
+            }
             final List<SplitReadEvidence> startSplitReads = getStartSplitReads(call, splitReadStartIntervalOverlapDetector);
             final List<DiscordantPairEvidence> discordantPairs = getDiscordantPairs(call, discordantPairIntervalOverlapDetector);
-            final List<SplitReadSite> startSitesList = computeSites(startSplitReads);
+            final List<SplitReadSite> startSitesList = computeSites(startSplitReads, true);
             callWithEvidence = new SVCallRecordWithEvidence(
                     call.getContig(), call.getStart(), call.getStartStrand(), call.getEndContig(), call.getEnd(), call.getEndStrand(),
-                    call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), startSitesList, null, discordantPairs);
+                    call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), startSitesList, Collections.emptyList(), discordantPairs);
         }
         if (progressMeter != null) {
             progressMeter.update(call.getStartAsInterval());
@@ -123,7 +126,7 @@ public class SVEvidenceCollector {
             refinedCall = new SVCallRecordWithEvidence(call, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
         } else {
             final List<SplitReadEvidence> endSplitReads = getEndSplitReads(call, splitReadEndIntervalOverlapDetector);
-            final List<SplitReadSite> endSitesList = computeSites(endSplitReads);
+            final List<SplitReadSite> endSitesList = computeSites(endSplitReads, false);
             refinedCall = new SVCallRecordWithEvidence(
                     call.getContig(), call.getStart(), call.getStartStrand(), call.getEndContig(), call.getEnd(), call.getEndStrand(),
                     call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), call.getStartSplitReadSites(), endSitesList, call.getDiscordantPairs());
@@ -134,10 +137,9 @@ public class SVEvidenceCollector {
         return refinedCall;
     }
 
-    private List<SplitReadEvidence> getSplitReads(final Function<SVCallRecord,SimpleInterval> intervalGetter,
-                                                  final SVCallRecordWithEvidence call,
+    private List<SplitReadEvidence> getSplitReads(final SimpleInterval interval,
+                                                  final boolean strand,
                                                   final OverlapDetector splitReadOverlapDetector) {
-        final SimpleInterval interval = intervalGetter.apply(call);
         if (invalidCacheInterval(splitReadCacheInterval, interval)) {
             Utils.nonNull(splitReadOverlapDetector, "Split read cache missed but overlap detector is null");
             final Set<SimpleInterval> queryIntervalSet = splitReadOverlapDetector.getOverlaps(interval);
@@ -148,18 +150,18 @@ public class SVEvidenceCollector {
             splitReadSource.queryAndPrefetch(splitReadCacheInterval);
         }
         return splitReadSource.queryAndPrefetch(interval).stream()
-                .filter(e -> e.getStrand() == call.getStartStrand())
+                .filter(e -> e.getStrand() == strand)
                 .collect(Collectors.toList());
     }
 
     private List<SplitReadEvidence> getStartSplitReads(final SVCallRecordWithEvidence call,
                                                        final OverlapDetector splitReadStartOverlapDetector) {
-        return getSplitReads(this::getStartSplitReadInterval, call, splitReadStartOverlapDetector);
+        return getSplitReads(getStartSplitReadInterval(call), call.getStartStrand(), splitReadStartOverlapDetector);
     }
 
     private List<SplitReadEvidence> getEndSplitReads(final SVCallRecordWithEvidence call,
                                                      final OverlapDetector splitReadEndOverlapDetector) {
-        return getSplitReads(this::getEndSplitReadInterval, call, splitReadEndOverlapDetector);
+        return getSplitReads(getEndSplitReadInterval(call), call.getEndStrand(), splitReadEndOverlapDetector);
     }
 
     private SimpleInterval getStartSplitReadInterval(final SVCallRecord call) {
@@ -213,7 +215,7 @@ public class SVEvidenceCollector {
                 && evidence.getEnd() < endInterval.getEnd();
     }
 
-    private List<SplitReadSite> computeSites(final List<SplitReadEvidence> evidenceList) {
+    private List<SplitReadSite> computeSites(final List<SplitReadEvidence> evidenceList, final boolean strand) {
         if (!Ordering.from(IntervalUtils.getDictionaryOrderComparator(dictionary)).isOrdered(evidenceList)) {
             throw new IllegalArgumentException("Evidence list is not dictionary sorted");
         }
@@ -222,14 +224,19 @@ public class SVEvidenceCollector {
         Map<String,Integer> sampleCounts = new HashMap<>();
         for (final SplitReadEvidence e : evidenceList) {
             if (e.getStart() != position) {
-                if (position > 0) {
+                if (!sampleCounts.isEmpty()) {
                     sites.add(new SplitReadSite(position, sampleCounts));
+                    sampleCounts = new HashMap<>();
                 }
                 position = e.getStart();
-                sampleCounts = new HashMap<>();
             }
-            final String sample = e.getSample();
-            sampleCounts.put(sample, e.getCount());
+            if (e.getStrand() == strand) {
+                final String sample = e.getSample();
+                sampleCounts.put(sample, e.getCount());
+            }
+        }
+        if (!sampleCounts.isEmpty()) {
+            sites.add(new SplitReadSite(position, sampleCounts));
         }
         sites.trimToSize();
         return sites;

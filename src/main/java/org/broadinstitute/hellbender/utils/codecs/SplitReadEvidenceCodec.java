@@ -21,7 +21,7 @@ public class SplitReadEvidenceCodec extends AsciiFeatureCodec<SplitReadEvidence>
     public SplitReadEvidence decode(final String line) {
         final List<String> tokens = splitter.splitToList(line);
         final String contig = tokens.get(0);
-        final int position = Integer.parseUnsignedInt(tokens.get(1));
+        final int position = Integer.parseUnsignedInt(tokens.get(1)) + 1;
         final boolean strand = tokens.get(2).equals("right");
         final int count = Integer.parseUnsignedInt(tokens.get(3));
         final String sample = tokens.get(4);
