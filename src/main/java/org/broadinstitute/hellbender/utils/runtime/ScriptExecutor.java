@@ -89,14 +89,8 @@ public abstract class ScriptExecutor {
 
         try {
             final ProcessSettings processSettings = new ProcessSettings(commandLineArguments);
-            //if debug is enabled, output the stdout and stderr, otherwise capture it to a buffer
-            if (logger.isDebugEnabled()) {
-                processSettings.getStdoutSettings().printStandard(true);
-                processSettings.getStderrSettings().printStandard(true);
-            } else {
-                processSettings.getStdoutSettings().setBufferSize(8192);
-                processSettings.getStderrSettings().setBufferSize(8192);
-            }
+            processSettings.getStdoutSettings().printStandard(true);
+            processSettings.getStderrSettings().printStandard(true);
 
             final ProcessController controller = ProcessController.getThreadLocal();
 
