@@ -6,6 +6,7 @@ import htsjdk.variant.variantcontext.StructuralVariantType;
 import htsjdk.variant.variantcontext.VariantContext;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
+import org.broadinstitute.hellbender.utils.codecs.SVCallRecordCodec;
 
 import java.util.Arrays;
 import java.util.List;
@@ -46,16 +47,19 @@ public class SVCallRecord implements Feature {
         final StructuralVariantType type = variant.getStructuralVariantType();
         final List<String> algorithms = variant.getAttributeAsStringList(SVCluster.ALG_ATTRIBUTE, "NA");
         final String strands = variant.getAttributeAsString(SVCluster.STRANDS_ATTRIBUTE, "0");
-        final char startStrandChar = strands.charAt(0);
-        if (startStrandChar != '+' && startStrandChar != '-') {
+        if (strands.length() != 2) {
+            throw new IllegalArgumentException("Strands field is not 2 characters long");
+        }
+        final String startStrandChar = strands.substring(0, 1);
+        if (!startStrandChar.equals(SVCallRecordCodec.STRAND_PLUS) && !startStrandChar.equals(SVCallRecordCodec.STRAND_MINUS)) {
             throw new IllegalArgumentException("Valid start strand not found");
         }
-        final char endStrandChar = strands.charAt(1);
-        if (endStrandChar != '+' && endStrandChar != '-') {
+        final String endStrandChar = strands.substring(1, 2);
+        if (!endStrandChar.equals(SVCallRecordCodec.STRAND_PLUS) && !endStrandChar.equals(SVCallRecordCodec.STRAND_MINUS)) {
             throw new IllegalArgumentException("Valid end strand not found");
         }
-        final boolean startStrand = strands.charAt(0) == '+';
-        final boolean endStrand = strands.charAt(1) == '+';
+        final boolean startStrand = startStrandChar.equals(SVCallRecordCodec.STRAND_PLUS);
+        final boolean endStrand = endStrandChar.equals(SVCallRecordCodec.STRAND_PLUS);
         final int length = variant.getAttributeAsInt(SVCluster.SVLEN_ATTRIBUTE, 0);
         final Set<String> samples = variant.getGenotypes().stream()
                 .filter(Genotype::isCalled)

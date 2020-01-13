@@ -19,6 +19,7 @@ import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
 import org.broadinstitute.hellbender.utils.IntervalUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
+import org.broadinstitute.hellbender.utils.codecs.SVCallRecordCodec;
 import org.broadinstitute.hellbender.utils.gcs.BucketUtils;
 
 import java.io.IOException;
@@ -117,6 +118,7 @@ public final class SVCluster extends GATKTool {
 
     private SAMSequenceDictionary dictionary;
 
+    private final Map<String,IntervalTree> whitelistedIntervalTreeMap = new HashMap<>();
     private FeatureDataSource<SVCallRecord> reader;
     private VariantContextWriter writer;
     private int variantsWritten;
@@ -129,17 +131,18 @@ public final class SVCluster extends GATKTool {
     private SVEvidenceCollector evidenceCollector;
     private Map<String,Double> sampleCoverageMap;
     private List<String> samplesList;
-
-    private final Map<String,IntervalTree> whitelistedIntervalTreeMap = new HashMap<>();
+    private String currentContig;
 
     public static String END_CONTIG_ATTRIBUTE = "CHR2";
     public static String END_POS_ATTRIBUTE = VCFConstants.END_KEY;
     public static String SVLEN_ATTRIBUTE = GATKSVVCFConstants.SVLEN;
     public static String SVTYPE_ATTRIBUTE = VCFConstants.SVTYPE;
     public static String STRANDS_ATTRIBUTE = "STRANDS";
+    public static String START_STRAND_ATTRIBUTE = "SS";
+    public static String END_STRAND_ATTRIBUTE = "ES";
     public static String ALG_ATTRIBUTE = "ALG";
-    public static String SPLIT_READ_START_COUNT_ATTRIBUTE = "SRS";
-    public static String SPLIT_READ_END_COUNT_ATTRIBUTE = "SRE";
+    public static String START_SPLIT_READ_COUNT_ATTRIBUTE = "SSR";
+    public static String END_SPLIT_READ_COUNT_ATTRIBUTE = "ESR";
     public static String DISCORDANT_PAIR_COUNT_ATTRIBUTE = "PE";
 
     private final int SPLIT_READ_QUERY_LOOKAHEAD = 0;
@@ -153,18 +156,19 @@ public final class SVCluster extends GATKTool {
             throw new UserException("Reference sequence dictionary required");
         }
         loadSampleCoverage();
-        loadSplitReadEvidenceDataSource();
-        loadDiscordantPairDataSource();
-        initializeWhitelistedIntervalTreeMap();
+        initializeSplitReadEvidenceDataSource();
+        initializeDiscordantPairDataSource();
+        loadIntervalTree();
 
         clusterEngine = new SVClusterEngine(dictionary);
         breakpointRefiner = new BreakpointRefiner(sampleCoverageMap);
         evidenceCollector = new SVEvidenceCollector(splitReadSource, discordantPairSource, dictionary, progressMeter);
 
-        reader = new FeatureDataSource<>(inputFile, "inputFile", INPUT_QUERY_LOOKAHEAD, SVCallRecord.class, getDefaultCloudPrefetchBufferSize(), getDefaultCloudIndexPrefetchBufferSize());
-        reader.setIntervalsForTraversal(getTraversalIntervals());
+        initializeReader();
         progressMeter.setRecordsBetweenTimeChecks(100);
         writer = createVCFWriter(Paths.get(outputFile));
+        writeVCFHeader();
+        currentContig = null;
         variantsWritten = 0;
     }
 
@@ -175,7 +179,18 @@ public final class SVCluster extends GATKTool {
         return null;
     }
 
-    private void loadSplitReadEvidenceDataSource() {
+    private void initializeReader() {
+        reader = new FeatureDataSource<>(
+                inputFile,
+                "inputFile",
+                INPUT_QUERY_LOOKAHEAD,
+                SVCallRecord.class,
+                getDefaultCloudPrefetchBufferSize(),
+                getDefaultCloudIndexPrefetchBufferSize());
+        reader.setIntervalsForTraversal(getTraversalIntervals());
+    }
+
+    private void initializeSplitReadEvidenceDataSource() {
         splitReadSource = new FeatureDataSource<>(
                 splitReadsFile,
                 "splitReadsFile",
@@ -185,7 +200,7 @@ public final class SVCluster extends GATKTool {
                 cloudIndexPrefetchBuffer);
     }
 
-    private void loadDiscordantPairDataSource() {
+    private void initializeDiscordantPairDataSource() {
         discordantPairSource = new FeatureDataSource<>(
                 discordantPairsFile,
                 "discordantPairsFile",
@@ -208,40 +223,45 @@ public final class SVCluster extends GATKTool {
         }
     }
 
-
-    private void initializeWhitelistedIntervalTreeMap() {
+    private void loadIntervalTree() {
         for (final SimpleInterval interval : getTraversalIntervals()) {
-            final String contig = interval.getContig();
-            whitelistedIntervalTreeMap.putIfAbsent(contig, new IntervalTree<>());
-            final IntervalTree tree = whitelistedIntervalTreeMap.get(contig);
-            tree.put(interval.getStart(), interval.getEnd(), null);
+            whitelistedIntervalTreeMap.putIfAbsent(interval.getContig(), new IntervalTree());
+            whitelistedIntervalTreeMap.get(interval.getContig()).put(interval.getStart(), interval.getEnd(), null);
         }
     }
 
     @Override
     public void traverse() {
-        logger.info("Clustering raw calls...");
-        final List<SVCallRecordWithEvidence> clusteredCalls = clusterCalls();
-        logger.info("Collecting evidence for " + clusteredCalls.size() + " clusters...");
-        final List<SVCallRecordWithEvidence> callsWithEvidence = evidenceCollector.collectEvidence(clusteredCalls);
-        logger.info("Refining breakpoints of " + clusteredCalls.size() + " clusters...");
-        final List<SVCallRecordWithEvidence> refinedCalls = callsWithEvidence.stream().map(breakpointRefiner::refineCall).collect(Collectors.toList());
-        final List<SVCallRecordWithEvidence> finalCalls = SVClusterEngine.deduplicateCalls(refinedCalls, dictionary);
-        logger.info("Writing output...");
-        writeOutput(finalCalls);
-    }
-
-    private List<SVCallRecordWithEvidence> clusterCalls() {
         StreamSupport.stream(Spliterators.spliteratorUnknownSize(reader.iterator(), Spliterator.ORDERED), false)
                 .filter(this::isValidSize)
                 .filter(this::isWhitelisted)
-                .map(SVCallRecordWithEvidence::new)
-                .forEach(clusterEngine::addVariant);
-        return clusterEngine.getOutput();
+                .forEachOrdered(this::processRecord);
+        if (!clusterEngine.isEmpty()) {
+            processClusters();
+        }
     }
 
-    private void writeOutput(final List<SVCallRecordWithEvidence> calls) {
-        writeVCFHeader();
+    private void processRecord(final SVCallRecord record) {
+        if (!record.getContig().equals(currentContig)) {
+            if (currentContig != null) {
+                processClusters();
+            }
+            currentContig = record.getContig();
+        }
+        clusterEngine.addVariant(new SVCallRecordWithEvidence(record));
+    }
+
+    private void processClusters() {
+        logger.info("Processing clusters on " + currentContig + ". Each record will be processed 3 times.");
+        final List<SVCallRecordWithEvidence> clusteredCalls = clusterEngine.getOutput();
+        clusterEngine.reset();
+        final List<SVCallRecordWithEvidence> callsWithEvidence = evidenceCollector.collectEvidence(clusteredCalls);
+        final List<SVCallRecordWithEvidence> refinedCalls = callsWithEvidence.stream().map(breakpointRefiner::refineCall).collect(Collectors.toList());
+        final List<SVCallRecordWithEvidence> finalCalls = SVClusterEngine.deduplicateCalls(refinedCalls, dictionary);
+        write(finalCalls);
+    }
+
+    private void write(final List<SVCallRecordWithEvidence> calls) {
         calls.stream()
                 .sorted(Comparator.comparing(c -> c.getStartAsInterval(), IntervalUtils.getDictionaryOrderComparator(dictionary)))
                 .map(this::buildVariantContext)
@@ -255,10 +275,12 @@ public final class SVCluster extends GATKTool {
         header.addMetaDataLine(new VCFInfoHeaderLine(END_POS_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "End position"));
         header.addMetaDataLine(new VCFInfoHeaderLine(SVLEN_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Variant length"));
         header.addMetaDataLine(new VCFInfoHeaderLine(SVTYPE_ATTRIBUTE, 1, VCFHeaderLineType.String, "Variant type"));
+        header.addMetaDataLine(new VCFInfoHeaderLine(START_STRAND_ATTRIBUTE, 1, VCFHeaderLineType.String, "Start strand"));
+        header.addMetaDataLine(new VCFInfoHeaderLine(END_STRAND_ATTRIBUTE, 1, VCFHeaderLineType.String, "End strand"));
         header.addMetaDataLine(new VCFInfoHeaderLine(ALG_ATTRIBUTE, 1, VCFHeaderLineType.String, "List of calling algorithms"));
         header.addMetaDataLine(new VCFFormatHeaderLine(VCFConstants.GENOTYPE_KEY, 1, VCFHeaderLineType.String, "Genotype"));
-        header.addMetaDataLine(new VCFFormatHeaderLine(SPLIT_READ_START_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Split read count at start of variant"));
-        header.addMetaDataLine(new VCFFormatHeaderLine(SPLIT_READ_END_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Split read count at end of variant"));
+        header.addMetaDataLine(new VCFFormatHeaderLine(START_SPLIT_READ_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Split read count at start of variant"));
+        header.addMetaDataLine(new VCFFormatHeaderLine(END_SPLIT_READ_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Split read count at end of variant"));
         header.addMetaDataLine(new VCFFormatHeaderLine(DISCORDANT_PAIR_COUNT_ATTRIBUTE, 1, VCFHeaderLineType.Integer, "Discordant pair count"));
         writer.writeHeader(header);
     }
@@ -273,6 +295,8 @@ public final class SVCluster extends GATKTool {
         builder.attribute(END_POS_ATTRIBUTE, call.getEnd());
         builder.attribute(SVLEN_ATTRIBUTE, call.getLength());
         builder.attribute(SVTYPE_ATTRIBUTE, call.getType());
+        builder.attribute(START_STRAND_ATTRIBUTE, getStrandString(call.getStartStrand()));
+        builder.attribute(END_STRAND_ATTRIBUTE, getStrandString(call.getEndStrand()));
         builder.attribute(ALG_ATTRIBUTE, call.getAlgorithms());
         final List<Genotype> genotypes = new ArrayList<>();
         final Map<String,Integer> startSplitReadCounts = getSplitReadCountsAtPosition(call.getStartSplitReadSites(), call.getStart());
@@ -280,8 +304,8 @@ public final class SVCluster extends GATKTool {
         final Map<String,Integer> discordantPairCounts = getDiscordantPairCountsMap(call.getDiscordantPairs());
         for (final String sample : sampleCoverageMap.keySet()) {
             final GenotypeBuilder genotypeBuilder = new GenotypeBuilder(sample);
-            genotypeBuilder.attribute(SPLIT_READ_START_COUNT_ATTRIBUTE, startSplitReadCounts.getOrDefault(sample, 0));
-            genotypeBuilder.attribute(SPLIT_READ_END_COUNT_ATTRIBUTE, endSplitReadCounts.getOrDefault(sample, 0));
+            genotypeBuilder.attribute(START_SPLIT_READ_COUNT_ATTRIBUTE, startSplitReadCounts.getOrDefault(sample, 0));
+            genotypeBuilder.attribute(END_SPLIT_READ_COUNT_ATTRIBUTE, endSplitReadCounts.getOrDefault(sample, 0));
             genotypeBuilder.attribute(DISCORDANT_PAIR_COUNT_ATTRIBUTE, discordantPairCounts.getOrDefault(sample, 0));
             if (call.getSamples().contains(sample)) {
                 genotypeBuilder.alleles(Lists.newArrayList(refAllele, altAllele));
@@ -294,6 +318,10 @@ public final class SVCluster extends GATKTool {
         builder.id(String.format("SVx%08X", variantsWritten));
         variantsWritten++;
         return builder.make();
+    }
+
+    private static String getStrandString(final boolean strand) {
+        return strand ? SVCallRecordCodec.STRAND_PLUS : SVCallRecordCodec.STRAND_MINUS;
     }
 
     private static Map<String,Integer> getSplitReadCountsAtPosition(final List<SplitReadSite> sites, final int pos) {
@@ -324,15 +352,12 @@ public final class SVCluster extends GATKTool {
     }
 
     private boolean isWhitelisted(final SVCallRecord call) {
-        if (!whitelistedIntervalTreeMap.containsKey(call.getContig()) || !whitelistedIntervalTreeMap.containsKey(call.getEndContig())) {
-            return false;
-        }
         final IntervalTree startTree = whitelistedIntervalTreeMap.get(call.getContig());
-        if (!startTree.overlappers(call.getStart(), call.getStart() + 1).hasNext()) {
+        if (startTree == null || !startTree.overlappers(call.getStart(), call.getStart() + 1).hasNext()) {
             return false;
         }
         final IntervalTree endTree = whitelistedIntervalTreeMap.get(call.getEndContig());
-        if (!endTree.overlappers(call.getEnd(), call.getEnd() + 1).hasNext()) {
+        if (endTree == null || !endTree.overlappers(call.getEnd(), call.getEnd() + 1).hasNext()) {
             return false;
         }
         return true;

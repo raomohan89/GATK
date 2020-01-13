@@ -70,14 +70,18 @@ public class SVEvidenceCollector {
     private List<SVCallRecordWithEvidence> processStartPositions(final List<SVCallRecordWithEvidence> calls) {
         final OverlapDetector splitReadStartIntervalOverlapDetector = getEvidenceOverlapDetector(calls, this::getStartSplitReadInterval);
         final OverlapDetector discordantPairIntervalOverlapDetector = getEvidenceOverlapDetector(calls, this::getDiscordantPairStartInterval);
-        return calls.stream().map(c -> getStartIndexedEvidence(c, splitReadStartIntervalOverlapDetector, discordantPairIntervalOverlapDetector))
+        return calls.stream()
+                .map(c -> processDiscordantPairs(c, discordantPairIntervalOverlapDetector))
+                .collect(Collectors.toList())
+                .stream()
+                .map(c -> processStartSplitReads(c, splitReadStartIntervalOverlapDetector))
                 .collect(Collectors.toList());
     }
 
     private List<SVCallRecordWithEvidence> processEndPositions(final List<SVCallRecordWithEvidence> calls) {
         final OverlapDetector splitReadEndIntervalOverlapDetector = getEvidenceOverlapDetector(calls, this::getEndSplitReadInterval);
         return calls.stream().sorted(Comparator.comparing(c -> c.getEndAsInterval(), IntervalUtils.getDictionaryOrderComparator(dictionary)))
-                .map(c -> getEndIndexedEvidence(c, splitReadEndIntervalOverlapDetector))
+                .map(c -> processEndSplitReads(c, splitReadEndIntervalOverlapDetector))
                 .collect(Collectors.toList());
     }
 
@@ -94,23 +98,17 @@ public class SVEvidenceCollector {
         return OverlapDetector.create(mergedIntervals);
     }
 
-    private SVCallRecordWithEvidence getStartIndexedEvidence(final SVCallRecordWithEvidence call,
-                                                             final OverlapDetector splitReadStartIntervalOverlapDetector,
-                                                             final OverlapDetector discordantPairIntervalOverlapDetector) {
+    private SVCallRecordWithEvidence processDiscordantPairs(final SVCallRecordWithEvidence call,
+                                                            final OverlapDetector discordantPairIntervalOverlapDetector) {
         Utils.nonNull(call);
         final SVCallRecordWithEvidence callWithEvidence;
         if (SVClusterEngine.isDepthOnlyCall(call)) {
-            callWithEvidence = new SVCallRecordWithEvidence(call, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+            callWithEvidence = call;
         } else {
-            if (call.getStart() == 1068047) {
-                int x = 0;
-            }
-            final List<SplitReadEvidence> startSplitReads = getStartSplitReads(call, splitReadStartIntervalOverlapDetector);
             final List<DiscordantPairEvidence> discordantPairs = getDiscordantPairs(call, discordantPairIntervalOverlapDetector);
-            final List<SplitReadSite> startSitesList = computeSites(startSplitReads, true);
             callWithEvidence = new SVCallRecordWithEvidence(
                     call.getContig(), call.getStart(), call.getStartStrand(), call.getEndContig(), call.getEnd(), call.getEndStrand(),
-                    call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), startSitesList, Collections.emptyList(), discordantPairs);
+                    call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), call.getStartSplitReadSites(), call.getEndSplitReadSites(), discordantPairs);
         }
         if (progressMeter != null) {
             progressMeter.update(call.getStartAsInterval());
@@ -118,15 +116,34 @@ public class SVEvidenceCollector {
         return callWithEvidence;
     }
 
-    private SVCallRecordWithEvidence getEndIndexedEvidence(final SVCallRecordWithEvidence call,
+    private SVCallRecordWithEvidence processStartSplitReads(final SVCallRecordWithEvidence call,
+                                                             final OverlapDetector splitReadStartIntervalOverlapDetector) {
+        Utils.nonNull(call);
+        final SVCallRecordWithEvidence callWithEvidence;
+        if (SVClusterEngine.isDepthOnlyCall(call)) {
+            callWithEvidence = call;
+        } else {
+            final List<SplitReadEvidence> startSplitReads = getStartSplitReads(call, splitReadStartIntervalOverlapDetector);
+            final List<SplitReadSite> startSitesList = computeSites(startSplitReads, call.getStartStrand());
+            callWithEvidence = new SVCallRecordWithEvidence(
+                    call.getContig(), call.getStart(), call.getStartStrand(), call.getEndContig(), call.getEnd(), call.getEndStrand(),
+                    call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), startSitesList, call.getEndSplitReadSites(), call.getDiscordantPairs());
+        }
+        if (progressMeter != null) {
+            progressMeter.update(call.getStartAsInterval());
+        }
+        return callWithEvidence;
+    }
+
+    private SVCallRecordWithEvidence processEndSplitReads(final SVCallRecordWithEvidence call,
                                                            final OverlapDetector splitReadEndIntervalOverlapDetector) {
         Utils.nonNull(call);
         final SVCallRecordWithEvidence refinedCall;
         if (SVClusterEngine.isDepthOnlyCall(call)) {
-            refinedCall = new SVCallRecordWithEvidence(call, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+            refinedCall = call;
         } else {
             final List<SplitReadEvidence> endSplitReads = getEndSplitReads(call, splitReadEndIntervalOverlapDetector);
-            final List<SplitReadSite> endSitesList = computeSites(endSplitReads, false);
+            final List<SplitReadSite> endSitesList = computeSites(endSplitReads, call.getEndStrand());
             refinedCall = new SVCallRecordWithEvidence(
                     call.getContig(), call.getStart(), call.getStartStrand(), call.getEndContig(), call.getEnd(), call.getEndStrand(),
                     call.getType(), call.getLength(), call.getAlgorithms(), call.getSamples(), call.getStartSplitReadSites(), endSitesList, call.getDiscordantPairs());

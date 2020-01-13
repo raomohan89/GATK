@@ -19,7 +19,7 @@ public class SVClusterEngine {
     private final int MAX_BREAKEND_CLUSTERING_WINDOW = 300;
 
     private final SAMSequenceDictionary dictionary;
-    private final List<Tuple2<SimpleInterval,List<Integer>>> currentClusters;
+    private final List<Tuple2<SimpleInterval,List<Integer>>> currentClusters; // Pairs of cluster start interval with variant IDs
     private final Map<Integer,SVCallRecordWithEvidence> idToVariantMap;
     private final List<SVCallRecordWithEvidence> outputBuffer;
     private int currentVariantId;
@@ -34,9 +34,21 @@ public class SVClusterEngine {
         currentContig = null;
     }
 
+    public void reset() {
+        currentClusters.clear();
+        idToVariantMap.clear();
+        outputBuffer.clear();
+        currentVariantId = 0;
+        currentContig = null;
+    }
+
     public List<SVCallRecordWithEvidence> getOutput() {
-        processBuffer();
+        flushClusters();
         return deduplicateCalls(outputBuffer, dictionary);
+    }
+
+    public boolean isEmpty() {
+        return currentContig == null;
     }
 
     public void addVariant(final SVCallRecordWithEvidence variant) {
@@ -45,7 +57,7 @@ public class SVClusterEngine {
 
         // Start a new cluster if on a new contig
         if (!variant.getContig().equals(currentContig)) {
-            processBuffer();
+            flushClusters();
             currentContig = variant.getContig();
             seedCluster(currentVariantId);
             return;
@@ -253,7 +265,7 @@ public class SVClusterEngine {
         return IntervalUtils.trimIntervalToContig(currentContig, newMinStart, newMaxStart, dictionary.getSequence(currentContig).getSequenceLength());
     }
 
-    private void processBuffer() {
+    private void flushClusters() {
         while (!currentClusters.isEmpty()) {
             processCluster(0);
         }

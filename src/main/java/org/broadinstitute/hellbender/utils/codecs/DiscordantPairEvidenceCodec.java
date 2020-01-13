@@ -10,6 +10,7 @@ import java.util.List;
 
 public class DiscordantPairEvidenceCodec extends AsciiFeatureCodec<DiscordantPairEvidence> {
 
+    public static final String FORMAT_SUFFIX = ".txt.gz";
     public static final char COL_DELIMITER = '\t';
     private static final Splitter splitter = Splitter.on(COL_DELIMITER);
 
@@ -20,12 +21,15 @@ public class DiscordantPairEvidenceCodec extends AsciiFeatureCodec<DiscordantPai
     @Override
     public DiscordantPairEvidence decode(final String line) {
         final List<String> tokens = splitter.splitToList(line);
+        if (tokens.size() != 7) {
+            throw new IllegalArgumentException("Invalid number of columns: " + tokens.size());
+        }
         final String startContig = tokens.get(0);
-        final int start = Integer.parseUnsignedInt(tokens.get(1)) + 1;
-        final boolean startStrand = tokens.get(2).equals("+");
+        final int start = Integer.parseUnsignedInt(tokens.get(1)) + 1; // Adjust for 0-based indexing
+        final boolean startStrand = tokens.get(2).equals(SVCallRecordCodec.STRAND_PLUS);
         final String endContig = tokens.get(3);
         final int end = Integer.parseUnsignedInt(tokens.get(4)) + 1;
-        final boolean endStrand = tokens.get(5).equals("+");
+        final boolean endStrand = tokens.get(5).equals(SVCallRecordCodec.STRAND_PLUS);
         final String sample = tokens.get(6);
         return new DiscordantPairEvidence(sample, startContig, start, startStrand, endContig, end, endStrand);
     }
@@ -37,7 +41,7 @@ public class DiscordantPairEvidenceCodec extends AsciiFeatureCodec<DiscordantPai
 
     @Override
     public boolean canDecode(final String path) {
-        return path.endsWith(".gz");
+        return path.endsWith(FORMAT_SUFFIX);
     } // TODO
 
     @Override
