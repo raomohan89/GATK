@@ -98,8 +98,13 @@ public class SomaticClusteringModel {
 
     public void record(final int[] tumorADs, final double[] tumorLogOdds, final List<Double> artifactProbabilities, final List<Double> nonSomaticProbabilities, final VariantContext vc) {
         final int totalAD = (int) MathUtils.sum(tumorADs);
+        // TODO: david b: is it important to have data for symbolic alleles?
+        int numAltAlleles = tumorLogOdds.length;
+        if (vc.hasSymbolicAlleles()) {
+            numAltAlleles--;
+        }
         // split into one-vs-all biallelics for clustering
-        for (int i = 0; i < tumorLogOdds.length; i++) {
+        for (int i = 0; i < numAltAlleles; i++) {
             data.add(new Datum(tumorLogOdds[i], artifactProbabilities.get(i), nonSomaticProbabilities.get(i), tumorADs[i+1], totalAD, indelLength(vc, i)));
         }
     }
