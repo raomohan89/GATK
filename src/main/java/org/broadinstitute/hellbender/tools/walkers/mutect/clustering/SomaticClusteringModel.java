@@ -96,11 +96,11 @@ public class SomaticClusteringModel {
         return clusterProbabilities(datum)[SEQUENCING_ERROR_INDEX];
     }
 
-    public void record(final int[] tumorADs, final double[] tumorLogOdds, final double artifactProbability, final double nonSomaticProbability, final VariantContext vc) {
+    public void record(final int[] tumorADs, final double[] tumorLogOdds, final List<Double> artifactProbabilities, final List<Double> nonSomaticProbabilities, final VariantContext vc) {
         final int totalAD = (int) MathUtils.sum(tumorADs);
         // split into one-vs-all biallelics for clustering
         for (int i = 0; i < tumorLogOdds.length; i++) {
-            data.add(new Datum(tumorLogOdds[i], artifactProbability, nonSomaticProbability, tumorADs[i+1], totalAD, indelLength(vc, i)));
+            data.add(new Datum(tumorLogOdds[i], artifactProbabilities.get(i), nonSomaticProbabilities.get(i), tumorADs[i+1], totalAD, indelLength(vc, i)));
         }
     }
 
